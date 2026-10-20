@@ -17,6 +17,8 @@ New-Item -ItemType Directory -Path release -Force | Out-Null
 & $iscc "/DAppVersion=$version" windows_installer.iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 Compress-Archive -Path dist\LinghaoPet -DestinationPath "release\LinghaoPet-Windows-x64-Portable-v$version.zip" -Force
+# Also wrap the installer for users who prefer downloading a ZIP.
+Compress-Archive -Path "release\LinghaoPet-Windows-x64-Setup-v$version.exe" -DestinationPath "release\LinghaoPet-Windows-x64-Setup-v$version.zip" -Force
 Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
     $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $($_.Name)"
