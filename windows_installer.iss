@@ -26,7 +26,8 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; Vendored from jrsoftware/issrc, blob d0d44258f51aa3127fc0d1167a7c8be328a9bdcf.
+Name: "chinesesimp"; MessagesFile: "installer\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
