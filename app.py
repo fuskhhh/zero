@@ -6,12 +6,13 @@ import sys
 import time
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QStandardPaths
-from PySide6.QtGui import QActionGroup, QBitmap, QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap, QRegion, QTransform
+from PySide6.QtGui import QActionGroup, QBitmap, QColor, QCursor, QFont, QIcon, QImage, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget
 
 from model import PetModel
+from animation import ATLAS_SIZE, CELL_WIDTH, CELL_HEIGHT, ROWS, LOOK_START, FRAME_COUNT, look_direction
 
-VERSION = '0.1.3'
+VERSION = '0.2.0'
 ASSETS = Path(__file__).resolve().parent / 'assets'
 INK, CREAM, MINT = '#233f39', '#fff9e9', '#a8d6bb'
 PHRASES = [
@@ -46,6 +47,11 @@ class Pet(QWidget):
         size = cfg.get('size', 240)
         self.pet_size = size if size in (170, 240, 310) else 240
         self.on_top = cfg.get('on_top', True) is not False
+        self.follow_mouse = cfg.get('follow_mouse', True) is not False
+        self._look_frame = None
+        self._last_cursor = None
+        self._gaze_until = 0
+        self._last_gaze_change = 0
         interval = cfg.get('reminder_minutes', 30)
         self.reminder_minutes = interval if interval in (15, 30, 45, 60) else 30
         # Reminder consent is per launch. Merely opening the pet never enables it.
@@ -73,25 +79,19 @@ class Pet(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        atlas = QImage(str(ASSETS / 'linghao-atlas-v1.png'))
-        if atlas.isNull():
+        atlas = QImage(str(ASSETS / 'linghao-codex-v2.webp'))
+        if atlas.isNull() or (atlas.width(), atlas.height()) != ATLAS_SIZE:
             raise RuntimeError('找不到零号动作素材，请保留应用的完整文件夹。')
-        # Equal-cell slicing handles atlases whose image dimensions are not /4.
+        # Preserve exact v2 cell registration; no per-pose fitting or mirroring.
         self.frames = []
-        for row in range(4):
-            for col in range(4):
-                x0, x1 = round(col * atlas.width() / 4), round((col + 1) * atlas.width() / 4)
-                y0, y1 = round(row * atlas.height() / 4), round((row + 1) * atlas.height() / 4)
-                frame = QPixmap(x1-x0, y1-y0)
-                frame.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(frame)
-                # The generated atlas has a few pixels of the preceding row's
-                # soles in its top gutter. Exclude that gutter while slicing.
-                gutter = round((y1-y0)*.038)
-                painter.drawImage(0, gutter, atlas.copy(x0, y0+gutter, x1-x0, y1-y0-gutter))
-                painter.end()
-                self.frames.append(frame)
-        self.load_observation_frames()
+        for row, (_, holds) in enumerate(ROWS):
+            for col in range(len(holds)):
+                self.frames.append(QPixmap.fromImage(atlas.copy(col*CELL_WIDTH, row*CELL_HEIGHT, CELL_WIDTH, CELL_HEIGHT)))
+        for index in range(16):
+            self.frames.append(QPixmap.fromImage(atlas.copy(index%8*CELL_WIDTH, (9+index//8)*CELL_HEIGHT, CELL_WIDTH, CELL_HEIGHT)))
+        self.frames.append(QPixmap.fromImage(atlas.copy(6*CELL_WIDTH, 0, CELL_WIDTH, CELL_HEIGHT)))
+        if len(self.frames) != FRAME_COUNT:
+            raise RuntimeError('零号动作表不完整。')
         self.scaled = {}
         self.resize_pet(self.pet_size)
         self.tray = QSystemTrayIcon(self.make_icon(), self)
@@ -112,30 +112,6 @@ class Pet(QWidget):
         self.timer.start(41)
         self.last_tick = time.monotonic()
         self.initial_position()
-
-    def load_observation_frames(self):
-        atlas = QImage(str(ASSETS / 'linghao-observe-v1.png'))
-        if atlas.isNull():
-            raise RuntimeError('找不到零号观察动作，请保留应用的完整文件夹。')
-        base = self.frames[0]
-        anchor = opaque_region(base).boundingRect()
-        for row in range(2):
-            for col in range(2):
-                x0, x1 = round(col*atlas.width()/2), round((col+1)*atlas.width()/2)
-                y0, y1 = round(row*atlas.height()/2), round((row+1)*atlas.height()/2)
-                tile = QPixmap.fromImage(atlas.copy(x0, y0, x1-x0, y1-y0))
-                bounds = opaque_region(tile).boundingRect()
-                if bounds.isEmpty():
-                    raise RuntimeError('观察动作单元为空。')
-                # Align separately generated poses to the existing body height
-                # and foot anchor, so changing actions does not resize the pet.
-                pose = tile.copy(bounds).scaled(base.width()-12, anchor.height(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)
-                frame = QPixmap(base.size())
-                frame.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(frame)
-                painter.drawPixmap((base.width()-pose.width())//2, anchor.bottom()+1-pose.height(), pose)
-                painter.end()
-                self.frames.append(frame)
 
     def make_icon(self):
         pm = QPixmap(64, 64)
@@ -179,12 +155,11 @@ class Pet(QWidget):
         self.save_settings()
 
     def sprite(self):
-        i = self.model.frame()
-        mirrored = self.model.mode == 'walk' and self.model.direction < 0
-        key = (i, mirrored, self.pet_size)
+        i = self._look_frame if self.model.mode == 'idle' and self._look_frame is not None else self.model.frame()
+        key = (i, self.pet_size)
         if key not in self.scaled:
-            pm = self.frames[i].scaled(self.pet_size, self.pet_size, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
-            self.scaled[key] = pm.transformed(QTransform().scale(-1, 1)) if mirrored else pm
+            # V2 cells are rectangular. Square stretching changes face shape.
+            self.scaled[key] = self.frames[i].scaled(self.pet_size, self.pet_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         return key, self.scaled[key]
 
     def update_shape(self):
@@ -196,7 +171,7 @@ class Pet(QWidget):
         if content_key == self._frame_key:
             return
         if self._frame_key is None or (key, bubble) != (self._frame_key[0], bool(self._frame_key[1])):
-            region = opaque_region(pm).translated((self.width()-self.pet_size)//2, 92)
+            region = opaque_region(pm).translated((self.width()-pm.width())//2, 92)
             if bubble:
                 region |= QRegion(QRect(4, 8, self.width()-8, 76))
             # Transparent space is removed from the native input region.
@@ -214,7 +189,7 @@ class Pet(QWidget):
             p.setFont(QFont('PingFang SC' if sys.platform == 'darwin' else 'Microsoft YaHei', 12))
             p.drawText(r.adjusted(12, 5, -12, -5), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, self.bubble)
         _, pm = self.sprite()
-        p.drawPixmap((self.width()-self.pet_size)//2, 92, pm)
+        p.drawPixmap((self.width()-pm.width())//2, 92, pm)
         p.end()
 
     def advance(self):
@@ -225,9 +200,32 @@ class Pet(QWidget):
         a = self.available()
         self.model.tick(dt, a.left(), a.right()+1, self.width())
         self.keep_in_bounds()
+        if not self.model.paused:
+            self.update_gaze(now=now)
         if self.bubble and now >= self.bubble_until:
             self.bubble = ''
         self.update_shape()
+
+    def update_gaze(self, *, cursor=None, now=None):
+        """Briefly watch a nearby moving pointer; never inspect screen content."""
+        cursor = QCursor.pos() if cursor is None else cursor
+        now = time.monotonic() if now is None else now
+        moved = self._last_cursor is not None and cursor != self._last_cursor
+        self._last_cursor = QPoint(cursor)
+        if not self.follow_mouse or self.model.mode != 'idle':
+            self._look_frame = None
+            return
+        center = self.mapToGlobal(QPoint(self.width()//2, 92+round(self.pet_size*.42)))
+        delta = cursor-center
+        distance2 = delta.x()**2+delta.y()**2
+        near = (self.pet_size*.2)**2 < distance2 < max(300, self.pet_size*1.6)**2
+        if moved and near:
+            self._gaze_until = now+2.5
+            if now-self._last_gaze_change >= .16:
+                self._look_frame = LOOK_START+look_direction(delta.x(), delta.y())
+                self._last_gaze_change = now
+        elif not near or now >= self._gaze_until:
+            self._look_frame = None
 
     def say(self, words, seconds=3.2):
         self.bubble, self.bubble_until = words, time.monotonic() + seconds
@@ -256,8 +254,12 @@ class Pet(QWidget):
         if delta.manhattanLength() >= QApplication.startDragDistance():
             self._dragged = True
         if self._dragged:
+            if self.model.mode != 'drag':
+                self.model.elapsed = 0
             self.model.mode = 'drag'
             point = self._press_origin + delta
+            if point.x() != self.model.x:
+                self.model.direction = 1 if point.x() > self.model.x else -1
             self.model.x, self.model.y = point.x(), point.y()
             # Move before choosing a screen, so dragging can cross monitors.
             self.move(point)
@@ -284,13 +286,18 @@ class Pet(QWidget):
         self.menu.popup(event.globalPos())
 
     def build_menu(self):
-        title = self.menu.addAction(f'零号桌宠 · {VERSION} 内部原型')
+        title = self.menu.addAction(f'零号桌宠 · {VERSION} 测试版')
         title.setEnabled(False)
         self.menu.addAction('显示零号', self.restore_pet)
         self.pause_action = self.menu.addAction('暂停活动', self.toggle_pause)
         self.pause_action.setCheckable(True)
         self.rest_action = self.menu.addAction('原地休息', self.toggle_rest)
         self.rest_action.setCheckable(True)
+        self.gaze_action = self.menu.addAction('看看鼠标', self.toggle_gaze)
+        self.gaze_action.setCheckable(True)
+        actions = self.menu.addMenu('做个动作')
+        for label, name in [('打个招呼', 'waving'), ('开心跳一下', 'jumping'), ('有点沮丧', 'failed'), ('等你回应', 'waiting'), ('认真思考', 'running'), ('仔细观察', 'review')]:
+            actions.addAction(label, lambda checked=False, n=name: self.play_action(n))
         self.menu.addSeparator()
         sizes = self.menu.addMenu('角色大小')
         group = QActionGroup(sizes)
@@ -321,6 +328,7 @@ class Pet(QWidget):
         self.pause_action.setChecked(self.model.paused)
         self.rest_action.setChecked(self.model.mode == 'rest')
         self.top_action.setChecked(self.on_top)
+        self.gaze_action.setChecked(self.follow_mouse)
         self.reminder_action.setChecked(self.reminder_on)
         for n, a in self.size_actions.items():
             a.setChecked(n == self.pet_size)
@@ -349,6 +357,18 @@ class Pet(QWidget):
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.on_top)
             self.show(); self.move(point)
         self.save_settings()
+
+    def toggle_gaze(self):
+        self.follow_mouse = not self.follow_mouse
+        self._look_frame = None
+        self.update_shape()
+        self.save_settings()
+
+    def play_action(self, name):
+        self.model.paused = False
+        self._look_frame = None
+        self.model.play(name)
+        self.update_shape()
 
     def set_interval(self, minutes):
         self.reminder_minutes = minutes
@@ -402,7 +422,7 @@ class Pet(QWidget):
             self.config_dir.mkdir(parents=True, exist_ok=True)
             target = self.config_dir / 'settings.json'
             tmp = target.with_suffix('.tmp')
-            tmp.write_text(json.dumps({'size': self.pet_size, 'on_top': self.on_top, 'reminder_minutes': self.reminder_minutes}, ensure_ascii=False))
+            tmp.write_text(json.dumps({'size': self.pet_size, 'on_top': self.on_top, 'reminder_minutes': self.reminder_minutes, 'follow_mouse': self.follow_mouse}, ensure_ascii=False))
             tmp.replace(target)
         except OSError:
             pass  # The pet remains usable in a read-only portable folder.

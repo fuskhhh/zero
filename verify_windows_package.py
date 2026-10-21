@@ -73,12 +73,16 @@ def main():
             zipped.extractall(folder / 'portable')
         exe = folder / 'portable' / 'LinghaoPet' / 'LinghaoPet.exe'
         check('portable_has_executable', exe.is_file())
+        atlas = Path('_internal') / 'assets' / 'linghao-codex-v2.webp'
+        source_atlas = (ROOT / 'assets' / 'linghao-codex-v2.webp').read_bytes()
+        check('portable_uses_exact_codex_atlas', (exe.parent/atlas).read_bytes() == source_atlas)
         launch(exe, folder / 'portable-config', 'portable')
         destination = folder / 'installed'
         result = subprocess.run([str(installer), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', f'/DIR={destination}', f'/LOG={folder / "install.log"}'], timeout=120)
         check('installer_success', result.returncode == 0)
         installed = destination / 'LinghaoPet.exe'
         check('installed_executable_matches_portable', installed.read_bytes() == exe.read_bytes())
+        check('installed_uses_exact_codex_atlas', (destination/atlas).read_bytes() == source_atlas)
         launch(installed, folder / 'installed-config', 'installed')
         uninstaller = destination / 'unins000.exe'
         check('uninstaller_present', uninstaller.is_file())
@@ -94,6 +98,7 @@ def main():
         'checks_passed': passed,
         'check_count': len(passed),
         'installer_sha256': hashlib.sha256(installer.read_bytes()).hexdigest(),
+        'atlas_sha256': hashlib.sha256(source_atlas).hexdigest(),
         'scope': 'Windows CI portable launch, visible window, install, installed launch and uninstall. Not a physical Windows desktop or long-session acceptance test.',
     }
     (CHECKS / 'windows-package.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')

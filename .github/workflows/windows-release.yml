@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Existing draft release tag (must match app version)
         required: true
-        default: v0.1.3
+        default: v0.2.0
 
 permissions:
   contents: read
