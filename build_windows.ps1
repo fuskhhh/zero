@@ -4,7 +4,7 @@ Set-Location $PSScriptRoot
 
 $version = & $Python -c "from app import VERSION; print(VERSION)"
 if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw "Cannot read application version" }
-& $Python -m PyInstaller --noconfirm --clean --windowed --onedir --name LinghaoPet --add-data "assets/linghao-codex-v2.webp;assets" app.py
+& $Python -m PyInstaller --noconfirm --clean --windowed --onedir --name LinghaoPet --add-data "assets/linghao-codex-v2.webp;assets" --add-data "assets/linghao-typing-v1.png;assets" --add-data "assets/linghao-mouse-v1.png;assets" app.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 # GitHub's Windows runner includes Inno Setup; local builds use the same compiler.

@@ -10,9 +10,9 @@ from PySide6.QtGui import QActionGroup, QBitmap, QColor, QCursor, QFont, QIcon, 
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget
 
 from model import PetModel
-from animation import ATLAS_SIZE, CELL_WIDTH, CELL_HEIGHT, ROWS, LOOK_START, FRAME_COUNT, look_direction
+from animation import ATLAS_SIZE, CELL_WIDTH, CELL_HEIGHT, ROWS, LOOK_START, EXTRA_CLIPS, FRAME_COUNT, look_direction
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 ASSETS = Path(__file__).resolve().parent / 'assets'
 INK, CREAM, MINT = '#233f39', '#fff9e9', '#a8d6bb'
 PHRASES = [
@@ -90,6 +90,12 @@ class Pet(QWidget):
         for index in range(16):
             self.frames.append(QPixmap.fromImage(atlas.copy(index%8*CELL_WIDTH, (9+index//8)*CELL_HEIGHT, CELL_WIDTH, CELL_HEIGHT)))
         self.frames.append(QPixmap.fromImage(atlas.copy(6*CELL_WIDTH, 0, CELL_WIDTH, CELL_HEIGHT)))
+        for name, (filename, holds) in EXTRA_CLIPS.items():
+            extra = QImage(str(ASSETS / filename))
+            if extra.isNull() or (extra.width(), extra.height()) != (CELL_WIDTH * len(holds), CELL_HEIGHT):
+                raise RuntimeError('找不到完整的零号动作素材：' + filename)
+            for col in range(len(holds)):
+                self.frames.append(QPixmap.fromImage(extra.copy(col*CELL_WIDTH, 0, CELL_WIDTH, CELL_HEIGHT)))
         if len(self.frames) != FRAME_COUNT:
             raise RuntimeError('零号动作表不完整。')
         self.scaled = {}
@@ -296,7 +302,7 @@ class Pet(QWidget):
         self.gaze_action = self.menu.addAction('看看鼠标', self.toggle_gaze)
         self.gaze_action.setCheckable(True)
         actions = self.menu.addMenu('做个动作')
-        for label, name in [('打个招呼', 'waving'), ('开心跳一下', 'jumping'), ('有点沮丧', 'failed'), ('等你回应', 'waiting'), ('认真思考', 'running'), ('仔细观察', 'review')]:
+        for label, name in [('打个招呼', 'waving'), ('开心跳一下', 'jumping'), ('有点沮丧', 'failed'), ('等你回应', 'waiting'), ('认真思考', 'running'), ('仔细观察', 'review'), ('敲会儿键盘', 'typing'), ('动动鼠标', 'using-mouse')]:
             actions.addAction(label, lambda checked=False, n=name: self.play_action(n))
         self.menu.addSeparator()
         sizes = self.menu.addMenu('角色大小')

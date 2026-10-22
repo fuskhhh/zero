@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from app import ASSETS, Pet, VERSION, opaque_region, read_settings
 from model import PetModel
-from animation import CLIPS, FRAME_COUNT, LOOK_START, frame_at
+from animation import CLIPS, EXTRA_CLIPS, FRAME_COUNT, LOOK_START, MANUAL_ACTIONS, frame_at
 
 OUT = Path(__file__).resolve().parents[2] / 'work' / 'desktop-pet-checks' / f'v{VERSION}'
 OUT.mkdir(parents=True, exist_ok=True)
@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(dir=OUT) as tmp:
     check('drag_leaves_at_least_one_quiet_minute', quiet >= 60)
     pet.model.mode, pet.model.action, pet.model.elapsed, pet.model.remaining = 'observe', 'review', .3, 6
     pet.update_shape()
-    check('codex_v2_all_74_poses_loaded', len(pet.frames) == FRAME_COUNT and all(not opaque_region(f).isEmpty() for f in pet.frames))
+    check('all_base_and_prop_poses_loaded', len(pet.frames) == FRAME_COUNT and all(not opaque_region(f).isEmpty() for f in pet.frames))
     anchor = opaque_region(pet.frames[0]).boundingRect()
     observation = opaque_region(pet.frames[pet.model.frame()]).boundingRect()
     check('observation_keeps_body_height', abs(anchor.height()-observation.height()) <= 10)
@@ -70,12 +70,16 @@ with tempfile.TemporaryDirectory(dir=OUT) as tmp:
     jump_start = CLIPS['jumping'][0]
     soles = [opaque_region(f).boundingRect().bottom() for f in pet.frames[jump_start:jump_start+5]]
     check('jump_has_airborne_apex_and_grounded_landing', max(soles)-min(soles) >= 35 and abs(soles[-1]-anchor.bottom()) <= 3)
-    for name in ('waving', 'jumping', 'failed', 'waiting', 'running', 'review'):
+    for name in MANUAL_ACTIONS:
         pet.play_action(name)
         pet.model.elapsed = .3
         pet.update_shape()
         check('manual_'+name+'_uses_correct_authored_clip', pet.sprite()[0][0] == frame_at(name, .3))
         pet.grab().save(str(OUT / (name+'.png')))
+        if name in EXTRA_CLIPS:
+            start, holds = CLIPS[name]
+            bounds = [opaque_region(f).boundingRect() for f in pet.frames[start:start+len(holds)]]
+            check(name+'_prop_ground_stays_anchored', max(b.bottom() for b in bounds)-min(b.bottom() for b in bounds) <= 2)
     pet.model.mode = 'idle'
     pet.follow_mouse = True
     center = pet.mapToGlobal(QPoint(pet.width()//2, 92+round(pet.pet_size*.42)))

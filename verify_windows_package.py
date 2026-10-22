@@ -11,6 +11,7 @@ import time
 import zipfile
 
 from app import VERSION
+from animation import EXTRA_CLIPS
 
 ROOT = Path(__file__).resolve().parent
 CHECKS = ROOT / 'checks'
@@ -76,6 +77,8 @@ def main():
         atlas = Path('_internal') / 'assets' / 'linghao-codex-v2.webp'
         source_atlas = (ROOT / 'assets' / 'linghao-codex-v2.webp').read_bytes()
         check('portable_uses_exact_codex_atlas', (exe.parent/atlas).read_bytes() == source_atlas)
+        for action, (filename, _) in EXTRA_CLIPS.items():
+            check('portable_exact_'+action+'_asset', (exe.parent/'_internal/assets'/filename).read_bytes() == (ROOT/'assets'/filename).read_bytes())
         launch(exe, folder / 'portable-config', 'portable')
         destination = folder / 'installed'
         result = subprocess.run([str(installer), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', f'/DIR={destination}', f'/LOG={folder / "install.log"}'], timeout=120)
@@ -83,6 +86,8 @@ def main():
         installed = destination / 'LinghaoPet.exe'
         check('installed_executable_matches_portable', installed.read_bytes() == exe.read_bytes())
         check('installed_uses_exact_codex_atlas', (destination/atlas).read_bytes() == source_atlas)
+        for action, (filename, _) in EXTRA_CLIPS.items():
+            check('installed_exact_'+action+'_asset', (destination/'_internal/assets'/filename).read_bytes() == (ROOT/'assets'/filename).read_bytes())
         launch(installed, folder / 'installed-config', 'installed')
         uninstaller = destination / 'unins000.exe'
         check('uninstaller_present', uninstaller.is_file())

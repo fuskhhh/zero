@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 import random
 
-from animation import CLIPS, MANUAL_ACTIONS, duration, frame_at
+from animation import ACTION_REPEATS, CLIPS, MANUAL_ACTIONS, duration, frame_at
 
 IDLE_SECONDS = (35, 80)
 LONG_IDLE_SECONDS = (120, 180)
@@ -42,7 +42,7 @@ class PetModel:
         if action not in MANUAL_ACTIONS:
             raise ValueError('Unknown pet action: ' + action)
         self.mode, self.action, self.elapsed = 'action', action, 0
-        self.remaining = duration(action) + .35
+        self.remaining = duration(action) * ACTION_REPEATS.get(action, 1) + .35
 
     def clamp(self, left, top, right, bottom, width, height):
         self.x = max(left, min(self.x, max(left, right - width)))
@@ -92,6 +92,10 @@ class PetModel:
         if self.mode == 'react':
             return frame_at('waving', self.elapsed)
         if self.mode in ('observe', 'action'):
+            if self.mode == 'action' and self.action in ACTION_REPEATS:
+                # A few authored loops, then a held ending; never endless typing.
+                active = self.elapsed < duration(self.action) * ACTION_REPEATS[self.action]
+                return frame_at(self.action, self.elapsed if active else duration(self.action), loop=active)
             return frame_at(self.action, self.elapsed)
         # Keep the authored idle micro-animation, with a long quiet gap.
         phase = self.elapsed % 9.5

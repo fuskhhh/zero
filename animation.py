@@ -21,8 +21,19 @@ for name, durations in ROWS:
     CLIPS[name] = (offset, durations)
     offset += len(durations)
 LOOK_START, NEUTRAL_FRAME = offset, offset + 16
-FRAME_COUNT = NEUTRAL_FRAME + 1
-MANUAL_ACTIONS = ('waving', 'jumping', 'failed', 'waiting', 'running', 'review')
+BASE_FRAME_COUNT = NEUTRAL_FRAME + 1
+# Append prop actions after the original atlas so gaze/neutral indices stay fixed.
+EXTRA_CLIPS = {
+    'typing': ('linghao-typing-v1.png', (160, 120, 100, 120, 100, 140, 120, 180)),
+    'using-mouse': ('linghao-mouse-v1.png', (180, 140, 140, 140, 180, 160, 140, 220)),
+}
+offset = BASE_FRAME_COUNT
+for name, (_, holds) in EXTRA_CLIPS.items():
+    CLIPS[name] = (offset, holds)
+    offset += len(holds)
+FRAME_COUNT = offset
+MANUAL_ACTIONS = ('waving', 'jumping', 'failed', 'waiting', 'running', 'review', *EXTRA_CLIPS)
+ACTION_REPEATS = {'typing': 3, 'using-mouse': 2}
 
 
 def duration(name):

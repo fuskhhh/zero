@@ -4,7 +4,7 @@ import unittest
 import math
 
 from model import PetModel
-from animation import CLIPS, FRAME_COUNT, MANUAL_ACTIONS, duration, frame_at, look_direction
+from animation import CLIPS, FRAME_COUNT, LOOK_START, MANUAL_ACTIONS, duration, frame_at, look_direction
 
 
 class QuietMovementTests(unittest.TestCase):
@@ -89,8 +89,8 @@ class QuietMovementTests(unittest.TestCase):
 
 class CodexAnimationTests(unittest.TestCase):
     def test_every_standard_clip_reaches_its_authored_frames_once(self):
-        self.assertEqual(FRAME_COUNT, 74)  # 57 standard + 16 gaze + neutral.
-        self.assertEqual([len(v[1]) for v in CLIPS.values()], [6,8,8,4,5,8,6,6,6])
+        self.assertEqual(FRAME_COUNT, 90)  # Original 74 + two 8-frame prop clips.
+        self.assertEqual([len(v[1]) for v in CLIPS.values()], [6,8,8,4,5,8,6,6,6,8,8])
         for name, (start, holds) in CLIPS.items():
             cursor = 0
             for index, hold in enumerate(holds):
@@ -139,6 +139,29 @@ class CodexAnimationTests(unittest.TestCase):
         before = (pet.frame(), pet.elapsed, pet.remaining)
         pet.tick(.1, 0, 1400, 240)
         self.assertEqual(before, (pet.frame(), pet.elapsed, pet.remaining))
+
+    def test_prop_actions_preserve_original_gaze_indices(self):
+        self.assertEqual(LOOK_START, 57)
+        self.assertEqual(CLIPS['typing'][0], 74)
+        self.assertEqual(CLIPS['using-mouse'][0], 82)
+
+    def test_prop_actions_repeat_briefly_then_hold_and_stay_in_place(self):
+        for action, repeats in [('typing', 3), ('using-mouse', 2)]:
+            pet = PetModel(x=500)
+            pet.play(action)
+            pet.elapsed = duration(action) + .05
+            self.assertEqual(pet.frame(), frame_at(action, .05))
+            pet.paused = True
+            before = (pet.frame(), pet.elapsed, pet.remaining, pet.x)
+            pet.tick(.1, 0, 1400, 240)
+            self.assertEqual(before, (pet.frame(), pet.elapsed, pet.remaining, pet.x))
+            pet.paused = False
+            pet.elapsed = duration(action) * repeats + .1
+            self.assertEqual(pet.frame(), frame_at(action, duration(action)))
+            pet.remaining = .01
+            pet.tick(.05, 0, 1400, 240)
+            self.assertEqual((pet.mode, pet.x), ('idle', 500))
+            self.assertGreaterEqual(pet.remaining, 60)
 
 
 if __name__ == '__main__':
